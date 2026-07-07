@@ -13,7 +13,7 @@ A real-time sensor monitoring dashboard with user feedback system.
 
 ```bash
 # 1. Navigate to project folder
-cd ex.sensor_dashboard
+cd LIVE-SENSOR-READINGS
 
 # 2. Install dependencies
 pip install -r requirements.txt
