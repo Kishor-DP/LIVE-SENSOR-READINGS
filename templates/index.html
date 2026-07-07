@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SensorGrid — Live Monitor</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c0f;
+    --surface: #111318;
+    --surface2: #181c24;
+    --border: #1e2530;
+    --border2: #252d3d;
+    --text: #c8d4e8;
+    --muted: #4a5568;
+    --accent: #00d4ff;
+    --accent2: #0099cc;
+    --normal: #00c97a;
+    --warning: #f5a623;
+    --critical: #ff3f5e;
+    --mono: 'IBM Plex Mono', monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--mono); min-height: 100vh; overflow-x: hidden; }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,212,255,0.012) 2px, rgba(0,212,255,0.012) 4px);
+    pointer-events: none; z-index: 1000;
+  }
+  header {
+    border-bottom: 1px solid var(--border); padding: 16px 32px;
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface); position: sticky; top: 0; z-index: 100;
+  }
+  .logo { display: flex; align-items: center; gap: 12px; }
+  .logo-mark {
+    width: 32px; height: 32px; border: 2px solid var(--accent);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 4px;
+  }
+  .logo-mark span { background: var(--accent); animation: pulse-grid 2s infinite; }
+  .logo-mark span:nth-child(2) { animation-delay: .5s; }
+  .logo-mark span:nth-child(3) { animation-delay: 1s; }
+  .logo-mark span:nth-child(4) { animation-delay: 1.5s; }
+  @keyframes pulse-grid { 0%,100%{opacity:1} 50%{opacity:.2} }
+  .logo-text { font-size: 18px; font-weight: 600; letter-spacing: 3px; color: var(--accent); text-transform: uppercase; }
+  .header-meta { display: flex; align-items: center; gap: 24px; font-size: 11px; color: var(--muted); }
+  .live-badge { display: flex; align-items: center; gap: 6px; color: var(--normal); font-size: 11px; letter-spacing: 2px; }
+  .live-dot { width: 6px; height: 6px; background: var(--normal); border-radius: 50%; animation: blink 1.5s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+  #clock { color: var(--text); letter-spacing: 2px; }
+  main { padding: 32px; max-width: 1400px; margin: 0 auto; }
+  .section-header {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 20px;
+    font-size: 11px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase;
+  }
+  .section-header::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  /* ── Stats bar ── */
+  .stats-bar {
+    display: grid; grid-template-columns: repeat(auto-fill,minmax(160px,1fr));
+    gap: 12px; margin-bottom: 32px;
+  }
+  .stat-tile {
+    background: var(--surface); border: 1px solid var(--border); padding: 16px 20px;
+    border-left: 3px solid var(--accent);
+  }
+  .stat-tile.warn { border-left-color: var(--warning); }
+  .stat-tile.crit { border-left-color: var(--critical); }
+  .stat-label { font-size: 9px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; margin-bottom: 6px; }
+  .stat-value { font-size: 26px; font-weight: 300; color: var(--accent); }
+  .stat-tile.warn .stat-value { color: var(--warning); }
+  .stat-tile.crit .stat-value { color: var(--critical); }
+  .stat-sub { font-size: 9px; color: var(--muted); margin-top: 4px; }
+
+  /* ── Sensor cards ── */
+  .sensor-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(280px,1fr)); gap: 16px; margin-bottom: 40px; }
+  .sensor-card {
+    background: var(--surface); border: 1px solid var(--border); padding: 24px;
+    position: relative; cursor: pointer; transition: border-color .2s, transform .2s; overflow: hidden;
+  }
+  .sensor-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--normal); transition: background .3s; }
+  .sensor-card.warning::before { background: var(--warning); }
+  .sensor-card.critical::before { background: var(--critical); }
+  .sensor-card:hover { border-color: var(--border2); transform: translateY(-2px); }
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+  .sensor-label { font-size: 10px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+  .sensor-name { font-size: 14px; font-weight: 500; color: var(--text); text-transform: capitalize; }
+  .sensor-icon { font-size: 24px; opacity: .7; }
+  .sensor-value-wrap { display: flex; align-items: baseline; gap: 6px; margin-bottom: 16px; }
+  .sensor-value { font-size: 42px; font-weight: 300; color: var(--accent); letter-spacing: -1px; transition: color .3s; line-height: 1; }
+  .sensor-card.warning .sensor-value { color: var(--warning); }
+  .sensor-card.critical .sensor-value { color: var(--critical); }
+  .sensor-unit { font-size: 14px; color: var(--muted); }
+  .sparkline-wrap { height: 32px; margin-bottom: 12px; }
+  .sparkline-wrap canvas { width: 100%; height: 100%; }
+  .sensor-bar { height: 3px; background: var(--border); overflow: hidden; margin-bottom: 12px; }
+  .sensor-bar-fill { height: 100%; background: var(--normal); transition: width .8s ease, background .3s; }
+  .sensor-card.warning .sensor-bar-fill { background: var(--warning); }
+  .sensor-card.critical .sensor-bar-fill { background: var(--critical); }
+  .card-footer { display: flex; justify-content: space-between; align-items: center; }
+  .status-badge { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; padding: 3px 8px; border: 1px solid var(--normal); color: var(--normal); }
+  .sensor-card.warning .status-badge { border-color: var(--warning); color: var(--warning); }
+  .sensor-card.critical .status-badge { border-color: var(--critical); color: var(--critical); }
+  .timestamp { font-size: 9px; color: var(--muted); letter-spacing: 1px; }
+
+  /* ── Charts ── */
+  .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 40px; }
+  .chart-card { background: var(--surface); border: 1px solid var(--border); padding: 24px; }
+  .chart-title { font-size: 10px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; margin-bottom: 16px; }
+  .chart-canvas-wrap { height: 160px; }
+
+  /* ── DB Records table ── */
+  .db-section { margin-bottom: 40px; }
+  .db-controls {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px;
+  }
+  .db-filter-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    padding: 5px 12px; font-family: var(--mono); font-size: 9px; letter-spacing: 2px;
+    cursor: pointer; text-transform: uppercase; transition: all .2s;
+  }
+  .db-filter-btn:hover, .db-filter-btn.active { border-color: var(--accent); color: var(--accent); }
+  .db-meta { font-size: 10px; color: var(--muted); margin-left: auto; letter-spacing: 1px; }
+
+  .records-table-wrap { overflow-x: auto; border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  thead tr { background: var(--surface2); }
+  th {
+    padding: 10px 14px; text-align: left; font-size: 9px; letter-spacing: 2px;
+    color: var(--muted); text-transform: uppercase; border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  td { padding: 9px 14px; border-bottom: 1px solid var(--border); color: var(--text); white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+  .td-status-normal  { color: var(--normal); }
+  .td-status-warning { color: var(--warning); }
+  .td-status-critical{ color: var(--critical); }
+  .td-sensor { color: var(--accent); letter-spacing: 1px; text-transform: uppercase; font-size: 10px; }
+
+  .pagination { display: flex; gap: 8px; margin-top: 14px; align-items: center; }
+  .pg-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    padding: 5px 12px; font-family: var(--mono); font-size: 10px; cursor: pointer; transition: all .2s;
+  }
+  .pg-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .pg-btn:disabled { opacity: .3; cursor: default; }
+  .pg-info { font-size: 10px; color: var(--muted); margin: 0 8px; }
+
+  /* ── Feedback ── */
+  .feedback-section { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .feedback-form-card, .feedback-log-card { background: var(--surface); border: 1px solid var(--border); padding: 28px; }
+  .form-group { margin-bottom: 20px; }
+  .form-label { display: block; font-size: 9px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
+  .star-rating { display: flex; gap: 8px; }
+  .star { font-size: 24px; cursor: pointer; opacity: .3; transition: opacity .2s, transform .1s; color: var(--warning); }
+  .star.active, .star:hover { opacity: 1; transform: scale(1.1); }
+  .category-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .cat-btn {
+    background: transparent; border: 1px solid var(--border2); color: var(--muted);
+    padding: 6px 12px; font-family: var(--mono); font-size: 10px; letter-spacing: 2px;
+    cursor: pointer; text-transform: uppercase; transition: all .2s;
+  }
+  .cat-btn:hover, .cat-btn.active { border-color: var(--accent); color: var(--accent); }
+  .sensor-select { display: flex; flex-wrap: wrap; gap: 6px; }
+  .sel-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    padding: 4px 10px; font-family: var(--mono); font-size: 9px; letter-spacing: 1px;
+    cursor: pointer; text-transform: uppercase; transition: all .2s;
+  }
+  .sel-btn:hover, .sel-btn.active { border-color: var(--accent2); color: var(--text); }
+  textarea {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); padding: 12px; font-family: var(--mono); font-size: 12px;
+    resize: vertical; min-height: 80px; outline: none; transition: border-color .2s;
+  }
+  textarea:focus { border-color: var(--accent2); }
+  textarea::placeholder { color: var(--muted); }
+  .submit-btn {
+    background: var(--accent); border: none; color: #000; padding: 12px 28px;
+    font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 3px;
+    text-transform: uppercase; cursor: pointer; transition: background .2s, transform .1s; width: 100%;
+  }
+  .submit-btn:hover { background: var(--accent2); }
+  .submit-btn:active { transform: scale(.98); }
+  .toast {
+    position: fixed; bottom: 32px; right: 32px; background: var(--normal); color: #000;
+    padding: 14px 24px; font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+    font-weight: 600; transform: translateY(80px); opacity: 0; transition: all .3s; z-index: 9999;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.error { background: var(--critical); }
+  .feedback-item { border-bottom: 1px solid var(--border); padding: 14px 0; animation: slide-in .3s ease; }
+  .feedback-item:last-child { border-bottom: none; }
+  @keyframes slide-in { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
+  .fi-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .fi-stars { color: var(--warning); font-size: 12px; }
+  .fi-time { font-size: 9px; color: var(--muted); letter-spacing: 1px; }
+  .fi-tags { display: flex; gap: 8px; margin-bottom: 4px; }
+  .fi-sensor { font-size: 9px; color: var(--accent); letter-spacing: 2px; text-transform: uppercase; }
+  .fi-cat { font-size: 9px; color: var(--muted); border: 1px solid var(--border); padding: 1px 6px; }
+  .fi-message { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+  .empty-state { text-align: center; padding: 40px; color: var(--muted); font-size: 11px; letter-spacing: 2px; }
+  .alert-bar {
+    background: rgba(255,63,94,.1); border: 1px solid var(--critical); border-left: 3px solid var(--critical);
+    padding: 10px 16px; margin-bottom: 24px; font-size: 11px; color: var(--critical); letter-spacing: 1px; display: none;
+  }
+  .alert-bar.show { display: block; animation: slide-in .3s; }
+
+  @media (max-width: 900px) {
+    .charts-row, .feedback-section { grid-template-columns: 1fr; }
+    .sensor-grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 560px) {
+    .sensor-grid { grid-template-columns: 1fr; }
+    main { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">
+    <div class="logo-mark"><span></span><span></span><span></span><span></span></div>
+    <span class="logo-text">SensorGrid</span>
+  </div>
+  <div class="header-meta">
+    <div class="live-badge"><div class="live-dot"></div> LIVE</div>
+    <span id="clock">--:--:--</span>
+    <span id="date-display">---</span>
+  </div>
+</header>
+
+<main>
+  <div id="alert-bar" class="alert-bar">⚠ CRITICAL ALERT — One or more sensors require immediate attention</div>
+
+  <!-- ── Stats ── -->
+  <div class="section-header">01 — DATABASE OVERVIEW</div>
+  <div class="stats-bar" id="stats-bar">
+    <div class="stat-tile"><div class="stat-label">Total Readings</div><div class="stat-value" id="stat-total">—</div><div class="stat-sub">all time</div></div>
+    <div class="stat-tile"><div class="stat-label">Feedback Entries</div><div class="stat-value" id="stat-fb">—</div><div class="stat-sub">submitted</div></div>
+    <div class="stat-tile" id="stat-temp-tile"><div class="stat-label">Avg Temperature</div><div class="stat-value" id="stat-temp">—</div><div class="stat-sub">last 24 h</div></div>
+    <div class="stat-tile" id="stat-hum-tile"><div class="stat-label">Avg Humidity</div><div class="stat-value" id="stat-hum">—</div><div class="stat-sub">last 24 h</div></div>
+    <div class="stat-tile" id="stat-aqi-tile"><div class="stat-label">Avg Air Quality</div><div class="stat-value" id="stat-aqi">—</div><div class="stat-sub">last 24 h</div></div>
+    <div class="stat-tile"><div class="stat-label">Readings (24 h)</div><div class="stat-value" id="stat-24h">—</div><div class="stat-sub">temperature samples</div></div>
+  </div>
+
+  <!-- ── Live sensors ── -->
+  <div class="section-header">02 — LIVE SENSOR READINGS</div>
+  <div class="sensor-grid" id="sensor-grid"></div>
+
+  <!-- ── Trend charts ── -->
+  <div class="section-header">03 — TREND ANALYSIS</div>
+  <div class="charts-row" id="charts-row"></div>
+
+  <!-- ── DB Records ── -->
+  <div class="section-header">04 — DATABASE RECORDS</div>
+  <div class="db-section">
+    <div class="db-controls">
+      <button class="db-filter-btn active" data-s="all" onclick="filterTable('all',this)">ALL</button>
+      <button class="db-filter-btn" data-s="temperature" onclick="filterTable('temperature',this)">TEMP</button>
+      <button class="db-filter-btn" data-s="humidity" onclick="filterTable('humidity',this)">HUMIDITY</button>
+      <button class="db-filter-btn" data-s="pressure" onclick="filterTable('pressure',this)">PRESSURE</button>
+      <button class="db-filter-btn" data-s="light" onclick="filterTable('light',this)">LIGHT</button>
+      <button class="db-filter-btn" data-s="air_quality" onclick="filterTable('air_quality',this)">AIR QUALITY</button>
+      <button class="db-filter-btn" data-s="vibration" onclick="filterTable('vibration',this)">VIBRATION</button>
+      <span class="db-meta" id="db-meta">— records</span>
+    </div>
+    <div class="records-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Sensor</th>
+            <th>Value</th>
+            <th>Unit</th>
+            <th>Status</th>
+            <th>Recorded At</th>
+          </tr>
+        </thead>
+        <tbody id="records-body">
+          <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <button class="pg-btn" id="pg-prev" onclick="changePage(-1)" disabled>← PREV</button>
+      <span class="pg-info" id="pg-info">Page 1</span>
+      <button class="pg-btn" id="pg-next" onclick="changePage(1)">NEXT →</button>
+    </div>
+  </div>
+
+  <!-- ── Feedback ── -->
+  <div class="section-header">05 — USER FEEDBACK</div>
+  <div class="feedback-section">
+    <div class="feedback-form-card">
+      <div class="form-group">
+        <label class="form-label">Overall Rating</label>
+        <div class="star-rating" id="stars">
+          <span class="star" data-v="1">★</span><span class="star" data-v="2">★</span>
+          <span class="star" data-v="3">★</span><span class="star" data-v="4">★</span>
+          <span class="star" data-v="5">★</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <div class="category-grid">
+          <button class="cat-btn" data-cat="accuracy">Accuracy</button>
+          <button class="cat-btn" data-cat="performance">Performance</button>
+          <button class="cat-btn" data-cat="alert">Alert System</button>
+          <button class="cat-btn" data-cat="ui">UI/UX</button>
+          <button class="cat-btn" data-cat="other">Other</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Related Sensor</label>
+        <div class="sensor-select">
+          <button class="sel-btn active" data-s="general">General</button>
+          <button class="sel-btn" data-s="temperature">Temperature</button>
+          <button class="sel-btn" data-s="humidity">Humidity</button>
+          <button class="sel-btn" data-s="pressure">Pressure</button>
+          <button class="sel-btn" data-s="light">Light</button>
+          <button class="sel-btn" data-s="air_quality">Air Quality</button>
+          <button class="sel-btn" data-s="vibration">Vibration</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Message</label>
+        <textarea id="fb-message" placeholder="Describe your observation or issue..."></textarea>
+      </div>
+      <button class="submit-btn" onclick="submitFeedback()">SUBMIT FEEDBACK</button>
+    </div>
+    <div class="feedback-log-card">
+      <div class="section-header" style="margin-bottom:16px">RECENT FEEDBACK (from DB)</div>
+      <div id="feedback-list"><div class="empty-state">NO FEEDBACK YET</div></div>
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SENSORS = ["temperature","humidity","pressure","light","air_quality","vibration"];
+const SENSOR_META = {
+  temperature: {label:"Temperature", icon:"🌡️"},
+  humidity:    {label:"Humidity",    icon:"💧"},
+  pressure:    {label:"Pressure",    icon:"🔵"},
+  light:       {label:"Light",       icon:"☀️"},
+  air_quality: {label:"Air Quality", icon:"🌿"},
+  vibration:   {label:"Vibration",   icon:"📳"},
+};
+
+let historyCache = {};
+let selectedRating = 0, selectedCategory = '', selectedSensor = 'general';
+let tablePage = 1, tableSensor = 'all', tableTotal = 0, tablePages = 1;
+
+// ── Clock ─────────────────────────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toTimeString().slice(0,8);
+  document.getElementById('date-display').textContent =
+    now.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+}
+setInterval(updateClock, 1000); updateClock();
+
+// ── Stats ─────────────────────────────────────────────────────────────────
+async function loadStats() {
+  const d = await fetch('/api/stats').then(r=>r.json());
+  document.getElementById('stat-total').textContent = d.total_readings.toLocaleString();
+  document.getElementById('stat-fb').textContent    = d.total_feedback;
+  const t = d.sensors.temperature;
+  const h = d.sensors.humidity;
+  const a = d.sensors.air_quality;
+  document.getElementById('stat-temp').textContent = t.avg !== null ? t.avg + '°C' : '—';
+  document.getElementById('stat-hum').textContent  = h.avg !== null ? h.avg + '%'  : '—';
+  document.getElementById('stat-aqi').textContent  = a.avg !== null ? a.avg        : '—';
+  document.getElementById('stat-24h').textContent  = t.cnt;
+}
+
+// ── Sensors ───────────────────────────────────────────────────────────────
+async function fetchSensors() {
+  const data = await fetch('/api/sensors').then(r=>r.json());
+  renderCards(data);
+}
+
+async function fetchHistory() {
+  const hist = await fetch('/api/history').then(r=>r.json());
+  historyCache = hist;
+  renderCharts(hist);
+}
+
+function renderCards(data) {
+  const grid = document.getElementById('sensor-grid');
+  const hasCritical = SENSORS.some(s => data[s] && data[s].status === 'critical');
+  document.getElementById('alert-bar').classList.toggle('show', hasCritical);
+
+  SENSORS.forEach(s => {
+    const d = data[s];
+    const pct = Math.min(100, Math.round((d.value - d.min) / (d.max - d.min) * 100));
+    let card = document.getElementById('card-' + s);
+    if (!card) {
+      card = document.createElement('div');
+      card.id = 'card-' + s;
+      card.onclick = () => selectSensor(s);
+      card.innerHTML = `
+        <div class="card-top">
+          <div>
+            <div class="sensor-label">${SENSOR_META[s].label}</div>
+            <div class="sensor-name">${s.replace('_',' ')}</div>
+          </div>
+          <div class="sensor-icon">${SENSOR_META[s].icon}</div>
+        </div>
+        <div class="sensor-value-wrap">
+          <div class="sensor-value" id="val-${s}">--</div>
+          <div class="sensor-unit" id="unit-${s}"></div>
+        </div>
+        <div class="sparkline-wrap"><canvas id="spark-${s}"></canvas></div>
+        <div class="sensor-bar"><div class="sensor-bar-fill" id="bar-${s}" style="width:0%"></div></div>
+        <div class="card-footer">
+          <span class="status-badge" id="status-${s}">NORMAL</span>
+          <span class="timestamp" id="ts-${s}"></span>
+        </div>`;
+      grid.appendChild(card);
+    }
+    card.className = `sensor-card ${d.status}`;
+    document.getElementById('val-'+s).textContent    = d.value;
+    document.getElementById('unit-'+s).textContent   = d.unit;
+    document.getElementById('bar-'+s).style.width    = pct + '%';
+    document.getElementById('status-'+s).textContent = d.status.toUpperCase();
+    document.getElementById('ts-'+s).textContent     = data.timestamp;
+    drawSparkline('spark-'+s, historyCache[s] || []);
+  });
+}
+
+// ── Sparklines ────────────────────────────────────────────────────────────
+function drawSparkline(id, values) {
+  const canvas = document.getElementById(id);
+  if (!canvas || values.length < 2) return;
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight;
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+  const mn = Math.min(...values), mx = Math.max(...values), rng = mx-mn || 1;
+  const pts = values.map((v,i) => ({x:(i/(values.length-1))*W, y:H-((v-mn)/rng)*H}));
+  ctx.strokeStyle='#00d4ff'; ctx.lineWidth=1.5; ctx.shadowBlur=4; ctx.shadowColor='#00d4ff';
+  ctx.beginPath();
+  pts.forEach((p,i) => i===0 ? ctx.moveTo(p.x,p.y) : ctx.lineTo(p.x,p.y));
+  ctx.stroke();
+}
+
+// ── Charts ────────────────────────────────────────────────────────────────
+function renderCharts(hist) {
+  const row = document.getElementById('charts-row');
+  ['temperature','humidity','air_quality','vibration'].forEach(s => {
+    let card = document.getElementById('chart-'+s);
+    if (!card) {
+      card = document.createElement('div');
+      card.className = 'chart-card'; card.id = 'chart-'+s;
+      card.innerHTML = `<div class="chart-title">${s.replace('_',' ')} — TREND (last 50 from DB)</div>
+                        <div class="chart-canvas-wrap"><canvas id="cc-${s}"></canvas></div>`;
+      row.appendChild(card);
+    }
+    drawChart('cc-'+s, hist[s] || []);
+  });
+}
+
+function drawChart(id, values) {
+  const canvas = document.getElementById(id);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight;
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+  if (values.length < 2) {
+    ctx.fillStyle='#4a5568'; ctx.font='10px IBM Plex Mono';
+    ctx.fillText('COLLECTING DATA...', W/2-55, H/2); return;
+  }
+  const mn=Math.min(...values), mx=Math.max(...values), rng=mx-mn||1;
+  const pad={l:40,r:10,t:10,b:20};
+  const W2=W-pad.l-pad.r, H2=H-pad.t-pad.b;
+  ctx.strokeStyle='#1e2530'; ctx.lineWidth=1;
+  [0,.25,.5,.75,1].forEach(f=>{
+    const y=pad.t+f*H2;
+    ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(W-pad.r,y); ctx.stroke();
+    ctx.fillStyle='#4a5568'; ctx.font='8px IBM Plex Mono';
+    ctx.fillText((mx-f*rng).toFixed(0), 2, y+3);
+  });
+  const pts = values.map((v,i)=>({x:pad.l+(i/(values.length-1))*W2, y:pad.t+(1-(v-mn)/rng)*H2}));
+  const grad = ctx.createLinearGradient(0,pad.t,0,pad.t+H2);
+  grad.addColorStop(0,'rgba(0,212,255,.2)'); grad.addColorStop(1,'rgba(0,212,255,0)');
+  ctx.beginPath();
+  pts.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y));
+  ctx.lineTo(pts[pts.length-1].x,pad.t+H2); ctx.lineTo(pts[0].x,pad.t+H2);
+  ctx.fillStyle=grad; ctx.fill();
+  ctx.strokeStyle='#00d4ff'; ctx.lineWidth=2; ctx.shadowBlur=6; ctx.shadowColor='#00d4ff';
+  ctx.beginPath();
+  pts.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y));
+  ctx.stroke(); ctx.shadowBlur=0;
+  const last=pts[pts.length-1];
+  ctx.beginPath(); ctx.arc(last.x,last.y,4,0,Math.PI*2);
+  ctx.fillStyle='#00d4ff'; ctx.fill();
+}
+
+// ── DB Records Table ──────────────────────────────────────────────────────
+async function loadRecords() {
+  const url = `/api/records?page=${tablePage}&per_page=20&sensor=${tableSensor}`;
+  const d = await fetch(url).then(r=>r.json());
+  tableTotal = d.total; tablePages = d.pages;
+
+  document.getElementById('db-meta').textContent =
+    `${d.total.toLocaleString()} record${d.total!==1?'s':''} · page ${d.page} of ${d.pages||1}`;
+  document.getElementById('pg-info').textContent = `Page ${d.page} / ${d.pages||1}`;
+  document.getElementById('pg-prev').disabled = d.page <= 1;
+  document.getElementById('pg-next').disabled = d.page >= d.pages;
+
+  const tbody = document.getElementById('records-body');
+  if (!d.rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px;letter-spacing:2px;">NO RECORDS</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = d.rows.map(r => `
+    <tr>
+      <td style="color:var(--muted)">${r.id}</td>
+      <td class="td-sensor">${r.sensor.replace('_',' ')}</td>
+      <td style="font-weight:500">${r.value}</td>
+      <td style="color:var(--muted)">${r.unit}</td>
+      <td class="td-status-${r.status}">${r.status.toUpperCase()}</td>
+      <td style="color:var(--muted);font-size:10px">${r.recorded_at}</td>
+    </tr>`).join('');
+}
+
+function filterTable(sensor, btn) {
+  tableSensor = sensor; tablePage = 1;
+  document.querySelectorAll('.db-filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  loadRecords();
+}
+
+function changePage(dir) {
+  tablePage = Math.max(1, Math.min(tablePages, tablePage + dir));
+  loadRecords();
+}
+
+// ── Feedback ──────────────────────────────────────────────────────────────
+function selectSensor(s) {
+  document.querySelectorAll('.sel-btn').forEach(b=>b.classList.toggle('active', b.dataset.s===s));
+  selectedSensor = s;
+}
+
+document.querySelectorAll('.star').forEach(star => {
+  star.addEventListener('click', () => {
+    selectedRating = +star.dataset.v;
+    document.querySelectorAll('.star').forEach((s,i)=>s.classList.toggle('active', i<selectedRating));
+  });
+  star.addEventListener('mouseenter', () => {
+    const v = +star.dataset.v;
+    document.querySelectorAll('.star').forEach((s,i)=>s.classList.toggle('active', i<v));
+  });
+});
+document.getElementById('stars').addEventListener('mouseleave', () => {
+  document.querySelectorAll('.star').forEach((s,i)=>s.classList.toggle('active', i<selectedRating));
+});
+document.querySelectorAll('.cat-btn').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.cat-btn').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); selectedCategory = b.dataset.cat;
+}));
+document.querySelectorAll('.sel-btn').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.sel-btn').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); selectedSensor = b.dataset.s;
+}));
+
+async function submitFeedback() {
+  if (!selectedRating)   { showToast('Please select a rating',   true); return; }
+  if (!selectedCategory) { showToast('Please select a category', true); return; }
+  const msg = document.getElementById('fb-message').value.trim();
+  const res = await fetch('/api/feedback',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({rating:selectedRating, category:selectedCategory,
+                          message:msg, sensor:selectedSensor})
+  });
+  const d = await res.json();
+  if (d.success) {
+    showToast('FEEDBACK SAVED TO DB ✓');
+    document.getElementById('fb-message').value = '';
+    selectedRating = 0; selectedCategory = '';
+    document.querySelectorAll('.star').forEach(s=>s.classList.remove('active'));
+    document.querySelectorAll('.cat-btn').forEach(b=>b.classList.remove('active'));
+    loadFeedback(); loadStats();
+  }
+}
+
+async function loadFeedback() {
+  const data = await fetch('/api/feedback').then(r=>r.json());
+  const list = document.getElementById('feedback-list');
+  if (!data.length) { list.innerHTML='<div class="empty-state">NO FEEDBACK YET</div>'; return; }
+  list.innerHTML = data.map(f=>`
+    <div class="feedback-item">
+      <div class="fi-header">
+        <span class="fi-stars">${'★'.repeat(f.rating)}${'☆'.repeat(5-f.rating)}</span>
+        <span class="fi-time">${f.created_at}</span>
+      </div>
+      <div class="fi-tags">
+        <span class="fi-sensor">${f.sensor}</span>
+        <span class="fi-cat">${f.category}</span>
+      </div>
+      ${f.message ? `<div class="fi-message">${f.message}</div>` : ''}
+    </div>`).join('');
+}
+
+function showToast(msg, error=false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (error?' error':'');
+  setTimeout(()=>t.className='toast', 3000);
+}
+
+// ── Init & polling ─────────────────────────────────────────────────────────
+async function init() {
+  await Promise.all([fetchSensors(), fetchHistory(), loadStats(), loadFeedback()]);
+  await loadRecords();
+}
+
+init();
+setInterval(async () => {
+  await Promise.all([fetchSensors(), fetchHistory()]);
+  loadStats();
+  loadRecords(); // refresh table with latest DB rows
+}, 4000);
+</script>
+</body>
+</html>
